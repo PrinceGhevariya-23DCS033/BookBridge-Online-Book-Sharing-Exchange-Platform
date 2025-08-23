@@ -53,9 +53,43 @@ router.get('/dashboard', auth, async (req, res) => {
 });
 
 // Create a new book request
-router.post('/', auth, upload.array('documents', 3), async (req, res) => {
+router.post('/', auth, upload.fields([
+  { name: 'documents', maxCount: 3 },
+  { name: 'coverImage', maxCount: 1 }
+]), async (req, res) => {
   try {
-    const { title, author, isbn, genre, reason, urgency } = req.body;
+    const { 
+      title, 
+      author, 
+      isbn, 
+      genre, 
+      description,
+      reason, 
+      urgency,
+      quantity,
+      address
+    } = req.body;
+    
+    console.log('Creating request with data:', {
+      title, author, isbn, genre, description, reason, urgency, quantity, address
+    });
+    
+    // Parse address if it's a string
+    let parsedAddress = address;
+    if (typeof address === 'string') {
+      try {
+        parsedAddress = JSON.parse(address);
+      } catch (err) {
+        console.error('Error parsing address:', err);
+        return res.status(400).json({ message: 'Invalid address format' });
+      }
+    }
+    
+    // Validate required address fields
+    if (!parsedAddress || !parsedAddress.street || !parsedAddress.city || 
+        !parsedAddress.state || !parsedAddress.postalCode || !parsedAddress.country) {
+      return res.status(400).json({ message: 'All address fields are required' });
+    }
     
     const request = new Request({
       requester: req.user.id,
@@ -65,14 +99,20 @@ router.post('/', auth, upload.array('documents', 3), async (req, res) => {
         isbn,
         genre
       },
+      description: description || '',
       reason,
-      urgency,
-      documents: req.files ? req.files.map(file => `/uploads/${file.filename}`) : []
+      urgency: urgency || 'medium',
+      quantity: quantity || 1,
+      address: parsedAddress,
+      documents: req.files?.documents ? req.files.documents.map(file => `/uploads/${file.filename}`) : [],
+      coverImage: req.files?.coverImage ? `/uploads/${req.files.coverImage[0].filename}` : ''
     });
 
     await request.save();
+    console.log('Request created successfully:', request._id);
     res.status(201).json(request);
   } catch (error) {
+    console.error('Error creating request:', error);
     res.status(500).json({ message: error.message });
   }
 });

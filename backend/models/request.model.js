@@ -49,6 +49,37 @@ const requestSchema = new mongoose.Schema({
   documents: [{
     type: String // URLs to uploaded documents
   }],
+  coverImage: {
+    type: String, // URL to cover image
+    default: ''
+  },
+  quantity: {
+    type: Number,
+    default: 1,
+    min: 1
+  },
+  address: {
+    street: {
+      type: String,
+      required: true
+    },
+    city: {
+      type: String,
+      required: true
+    },
+    state: {
+      type: String,
+      required: true
+    },
+    postalCode: {
+      type: String,
+      required: true
+    },
+    country: {
+      type: String,
+      required: true
+    }
+  }
 }, {
   timestamps: true
 });

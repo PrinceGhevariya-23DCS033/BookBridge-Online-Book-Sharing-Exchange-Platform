@@ -1,5 +1,5 @@
 import { AlertCircle, BookOpen as BookOpenIcon, Check, CheckCircle2, MapPin } from 'lucide-react';
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Footer from '../components/Footer';
 import { requestAPI } from '../services/api';
@@ -74,12 +74,27 @@ const RequestPage = () => {
   
   const [submitted, setSubmitted] = useState(false);
   
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (!event.target.closest('.suggestions-container')) {
+        setShowSuggestions(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, []);
+
   const fetchBookDetailsByISBN = async (isbn) => {
     setIsbnLoading(true);
     setError('');
     
     try {
       const cleanISBN = isbn.replace(/[-\s]/g, '');
+      
+      // Use OpenLibrary API (same as donation page) for consistency
       const response = await fetch(`https://openlibrary.org/api/books?bibkeys=ISBN:${cleanISBN}&format=json&jscmd=data`);
       const data = await response.json();
       
@@ -93,6 +108,7 @@ const RequestPage = () => {
             const imageResponse = await fetch(bookData.cover.large);
             const imageBlob = await imageResponse.blob();
             coverImage = new File([imageBlob], `book-cover-${cleanISBN}.jpg`, { type: 'image/jpeg' });
+            setCoverPreview(URL.createObjectURL(coverImage));
           } catch (err) {
             console.error('Error fetching cover image:', err);
           }
@@ -107,6 +123,10 @@ const RequestPage = () => {
           description: bookData.description?.value || bookData.description || prev.description,
           coverImage: coverImage || prev.coverImage
         }));
+        
+        // Hide any existing suggestions when auto-filling
+        setTitleSuggestions([]);
+        setShowSuggestions(false);
       } else {
         setError('No book found with this ISBN. Please enter the details manually.');
       }
@@ -122,21 +142,27 @@ const RequestPage = () => {
     const { value } = e.target;
     setFormData(prev => ({ ...prev, isbn: value }));
     
-    // If ISBN is 10 or 13 digits, fetch book details
-    if (value.replace(/[-\s]/g, '').length === 10 || value.replace(/[-\s]/g, '').length === 13) {
+    // Clear any previous errors
+    setError('');
+    
+    // If ISBN is valid (10 or 13 digits), automatically fetch book details
+    const cleanISBN = value.replace(/[-\s]/g, '');
+    if (cleanISBN.length === 10 || cleanISBN.length === 13) {
+      console.log('Valid ISBN detected, fetching book details...');
       fetchBookDetailsByISBN(value);
     }
   };
 
   const searchBooksByTitle = async (query) => {
-    if (query.length < 3) {
+    if (query.length < 2) {
       setTitleSuggestions([]);
       return;
     }
 
     setTitleLoading(true);
     try {
-      const response = await fetch(`https://openlibrary.org/search.json?title=${encodeURIComponent(query)}&limit=5`);
+      // Use OpenLibrary API for consistent results with donation page
+      const response = await fetch(`https://openlibrary.org/search.json?title=${encodeURIComponent(query)}&limit=8`);
       const data = await response.json();
       
       if (data.docs && data.docs.length > 0) {
@@ -151,10 +177,14 @@ const RequestPage = () => {
             genre: book.subject?.[0] || '',
             description: book.first_sentence?.[0] || '',
             key: book.key,
-            coverId: book.cover_i
+            coverId: book.cover_i,
+            source: 'openlibrary',
+            publishYear: book.first_publish_year || '',
+            language: book.language?.[0] || 'en'
           };
         });
-        console.log('Search suggestions:', suggestions); // Debug log
+        
+        console.log('Search suggestions:', suggestions);
         setTitleSuggestions(suggestions);
       } else {
         setTitleSuggestions([]);
@@ -201,8 +231,18 @@ const RequestPage = () => {
   const handleTitleChange = (e) => {
     const { value } = e.target;
     setFormData(prev => ({ ...prev, title: value }));
-    searchBooksByTitle(value);
-    setShowSuggestions(true);
+    
+    // Clear any previous errors
+    setError('');
+    
+    // Show suggestions as user types (reduced threshold to 2 characters)
+    if (value.length >= 2) {
+      searchBooksByTitle(value);
+      setShowSuggestions(true);
+    } else {
+      setTitleSuggestions([]);
+      setShowSuggestions(false);
+    }
   };
 
   const handleSuggestionClick = async (suggestion) => {
@@ -210,62 +250,61 @@ const RequestPage = () => {
     try {
       console.log('Selected suggestion:', suggestion);
 
-      // First update the form with available data
+      // Update the form with available data immediately
       setFormData(prev => ({
         ...prev,
         title: suggestion.title,
         author: suggestion.author,
         genre: suggestion.genre,
-        description: suggestion.description
+        description: suggestion.description,
+        isbn: suggestion.isbn || prev.isbn
       }));
 
-      // Try to get ISBN from the book details
-      if (suggestion.key) {
-        const bookDetails = await fetchBookDetails(suggestion.key);
-        console.log('Book details:', bookDetails);
-        
-        let isbn = null;
-        
-        // Try to get ISBN from the editions data
-        if (bookDetails?.isbn_13?.[0]) {
-          isbn = bookDetails.isbn_13[0];
-        } else if (bookDetails?.isbn_10?.[0]) {
-          isbn = bookDetails.isbn_10[0];
-        }
-
-        // If still no ISBN, try searching by title and author
-        if (!isbn) {
-          const searchResponse = await fetch(
-            `https://openlibrary.org/search.json?title=${encodeURIComponent(suggestion.title)}&author=${encodeURIComponent(suggestion.author)}&limit=1`
-          );
-          const searchData = await searchResponse.json();
-          console.log('Search data:', searchData);
+      // Fetch cover image if available
+      if (suggestion.coverId) {
+        try {
+          const imageUrl = `https://covers.openlibrary.org/b/id/${suggestion.coverId}-L.jpg`;
+          const imageResponse = await fetch(imageUrl);
           
-          if (searchData.docs?.[0]?.isbn?.[0]) {
-            isbn = searchData.docs[0].isbn[0];
+          if (imageResponse.ok) {
+            const imageBlob = await imageResponse.blob();
+            const coverImage = new File([imageBlob], `book-cover-${suggestion.title}.jpg`, { type: 'image/jpeg' });
+            setFormData(prev => ({ ...prev, coverImage }));
+            setCoverPreview(URL.createObjectURL(coverImage));
           }
+        } catch (err) {
+          console.error('Error fetching cover image:', err);
         }
+      }
 
-        // Update form with ISBN if found
-        if (isbn) {
-          console.log('Found ISBN:', isbn);
-          setFormData(prev => ({ ...prev, isbn }));
-          // Also fetch additional book details using the ISBN
-          await fetchBookDetailsByISBN(isbn);
-        } else {
-          // Try to fetch cover image using cover ID
-          if (suggestion.coverId) {
-            try {
-              const imageUrl = `https://covers.openlibrary.org/b/id/${suggestion.coverId}-L.jpg`;
-              const imageResponse = await fetch(imageUrl);
-              const imageBlob = await imageResponse.blob();
-              const coverImage = new File([imageBlob], `book-cover-${suggestion.title}.jpg`, { type: 'image/jpeg' });
-              setFormData(prev => ({ ...prev, coverImage }));
-            } catch (err) {
-              console.error('Error fetching cover image:', err);
-            }
+      // If we have ISBN, fetch additional details to ensure we have complete information
+      if (suggestion.isbn) {
+        console.log('Fetching additional details for ISBN:', suggestion.isbn);
+        await fetchBookDetailsByISBN(suggestion.isbn);
+      } else if (suggestion.key) {
+        // Try to get more details from the book's work page
+        try {
+          const bookDetails = await fetchBookDetails(suggestion.key);
+          console.log('Book details:', bookDetails);
+          
+          // Try to get ISBN from editions
+          let isbn = null;
+          if (bookDetails?.isbn_13?.[0]) {
+            isbn = bookDetails.isbn_13[0];
+          } else if (bookDetails?.isbn_10?.[0]) {
+            isbn = bookDetails.isbn_10[0];
           }
-          setError('Could not find ISBN for this book. Please enter it manually.');
+
+          if (isbn) {
+            console.log('Found ISBN from book details:', isbn);
+            setFormData(prev => ({ ...prev, isbn }));
+            // Get additional details using ISBN
+            await fetchBookDetailsByISBN(isbn);
+          } else {
+            console.log('No ISBN found for this book');
+          }
+        } catch (err) {
+          console.error('Error fetching additional book details:', err);
         }
       }
 
@@ -404,7 +443,7 @@ const RequestPage = () => {
                     <h2 className="text-lg font-medium text-gray-900">Book Details</h2>
                     
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                      <div>
+                      <div className="relative suggestions-container">
                         <label className="block text-sm font-medium text-gray-700 mb-1">
                           Book Title *
                         </label>
@@ -412,9 +451,58 @@ const RequestPage = () => {
                           type="text"
                           required
                           value={formData.title}
-                          onChange={(e) => setFormData({ ...formData, title: e.target.value })}
+                          onChange={handleTitleChange}
+                          onFocus={() => setShowSuggestions(true)}
+                          placeholder="Start typing to search for books..."
                           className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent"
                         />
+                        {titleLoading && (
+                          <div className="absolute right-3 top-9">
+                            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-teal-600"></div>
+                          </div>
+                        )}
+                        
+                        {/* Suggestions Dropdown */}
+                        {showSuggestions && titleSuggestions.length > 0 && (
+                          <div className="absolute z-10 mt-1 w-full bg-white border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-y-auto">
+                            {titleSuggestions.map((suggestion, index) => (
+                              <div
+                                key={index}
+                                onClick={() => handleSuggestionClick(suggestion)}
+                                className="px-4 py-3 hover:bg-gray-50 cursor-pointer border-b border-gray-100 last:border-b-0"
+                              >
+                                <div className="flex items-start space-x-3">
+                                  {suggestion.coverId && (
+                                    <img
+                                      src={`https://covers.openlibrary.org/b/id/${suggestion.coverId}-S.jpg`}
+                                      alt="Book cover"
+                                      className="w-8 h-10 object-cover rounded flex-shrink-0"
+                                      onError={(e) => { e.target.style.display = 'none'; }}
+                                    />
+                                  )}
+                                  <div className="flex-1 min-w-0">
+                                    <p className="text-sm font-medium text-gray-900 truncate">
+                                      {suggestion.title}
+                                    </p>
+                                    <p className="text-xs text-gray-500">
+                                      by {suggestion.author}
+                                    </p>
+                                    {suggestion.publishYear && (
+                                      <p className="text-xs text-gray-400">
+                                        Published: {suggestion.publishYear}
+                                      </p>
+                                    )}
+                                    {suggestion.isbn && (
+                                      <p className="text-xs text-gray-400">
+                                        ISBN: {suggestion.isbn}
+                                      </p>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
                       
                       <div>
@@ -432,7 +520,7 @@ const RequestPage = () => {
                     </div>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                      <div>
+                      <div className="relative">
                         <label className="block text-sm font-medium text-gray-700 mb-1">
                           ISBN *
                         </label>
@@ -440,9 +528,18 @@ const RequestPage = () => {
                           type="text"
                           required
                           value={formData.isbn}
-                          onChange={(e) => setFormData({ ...formData, isbn: e.target.value })}
+                          onChange={handleISBNChange}
+                          placeholder="Enter 10 or 13 digit ISBN"
                           className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent"
                         />
+                        {isbnLoading && (
+                          <div className="absolute right-3 top-9">
+                            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-teal-600"></div>
+                          </div>
+                        )}
+                        <p className="text-xs text-gray-500 mt-1">
+                          Auto-fills title, author, and genre when valid ISBN is entered
+                        </p>
                       </div>
                       
                       <div>

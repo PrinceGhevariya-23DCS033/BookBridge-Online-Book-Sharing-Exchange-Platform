@@ -1,7 +1,7 @@
 import { ChevronLeft, Heart, MapPin, MessageCircle, Share2, ShoppingCart, Star, Tag, User } from 'lucide-react';
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { cartAPI } from '../services/api';
+import { cartAPI, marketplaceAPI } from '../services/api';
 
 const SecondHandProductPage = () => {
   const { id } = useParams();
@@ -9,46 +9,157 @@ const SecondHandProductPage = () => {
   const [isInWishlist, setIsInWishlist] = useState(false);
   const [showMessageForm, setShowMessageForm] = useState(false);
   const [message, setMessage] = useState('');
+  const [book, setBook] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
 
-  // Mock data - In a real app, this would come from an API
-  const book = {
-    id: 'sh1',
-    title: 'The Great Gatsby',
-    author: 'F. Scott Fitzgerald',
-    condition: 'Like New',
-    price: 12.99,
-    currency: 'USD',
-    listingType: 'sale',
-    location: 'New York, NY',
-    seller: 'John Doe',
-    sellerId: 'user1',
-    rating: 4.5,
-    image: 'https://images.unsplash.com/photo-1543002588-bfa74002ed7e?w=500',
-    description: 'Hardcover edition in excellent condition. No marks or highlights. This is a first edition copy of the classic novel by F. Scott Fitzgerald. The book has been well-maintained and shows minimal signs of wear.',
-    postedDate: '2024-03-15',
-    category: 'Fiction',
-    status: 'available',
-    interestedBuyers: ['user2', 'user3'],
-    messages: [
-      {
-        id: 'msg1',
-        senderId: 'user2',
-        senderName: 'Alice Smith',
-        message: 'Is this book still available?',
-        timestamp: '2024-03-16T10:30:00',
-      },
-    ],
+  useEffect(() => {
+    fetchBookDetails();
+  }, [id]);
+
+  const fetchBookDetails = async () => {
+    try {
+      setLoading(true);
+      const response = await marketplaceAPI.getListing(id);
+      
+      if (response.data) {
+        const bookData = response.data;
+        setBook({
+          id: bookData._id,
+          title: bookData.title,
+          author: bookData.author,
+          condition: bookData.condition,
+          price: bookData.price,
+          currency: 'USD',
+          listingType: bookData.category === 'free' || bookData.category === 'donated' ? 'free' : 'sale',
+          category: bookData.category,
+          location: bookData.sellerContact?.address || bookData.owner?.location || 'Location not available',
+          seller: bookData.owner?.name || 'Unknown Seller',
+          sellerId: bookData.owner?._id,
+          rating: 0,
+          image: bookData.image?.startsWith('http') ? bookData.image : `http://localhost:5000${bookData.image}`,
+          description: bookData.description,
+          postedDate: bookData.createdAt,
+          genre: bookData.genre,
+          status: bookData.status,
+          interestedBuyers: [],
+          messages: []
+        });
+      }
+    } catch (error) {
+      console.error('Error fetching book details:', error);
+      setError('Failed to fetch book details');
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const handleSendMessage = (e) => {
+  const handleSendMessage = async (e) => {
     e.preventDefault();
-    // Implement message sending functionality
-    console.log('Sending message:', message);
-    setMessage('');
-    setShowMessageForm(false);
+    try {
+      const response = await marketplaceAPI.getContactDetails(id);
+      const contactInfo = response.data;
+      
+      // Create email with the message
+      const subject = encodeURIComponent(`Message about your book: ${book?.title}`);
+      const body = encodeURIComponent(`Hi ${contactInfo.sellerName},\n\n${message}\n\nBest regards`);
+      
+      // Open email client
+      window.open(`mailto:${contactInfo.email}?subject=${subject}&body=${body}`);
+      
+      // Show success message
+      alert(`Your message will be sent to ${contactInfo.email}`);
+      
+      setMessage('');
+      setShowMessageForm(false);
+    } catch (error) {
+      console.error('Error getting contact details:', error);
+      if (error.response?.status === 401) {
+        alert('Please login to contact the seller');
+        navigate('/login');
+      } else {
+        alert('Failed to get contact details. Please try again.');
+      }
+    }
   };
 
-  const handleMarkAsSold = () => {
+  const handleContactSeller = async () => {
+    try {
+      const response = await marketplaceAPI.getContactDetails(id);
+      const contactInfo = response.data;
+      
+      // Create a detailed contact information display
+      const contactMessage = `
+Contact Information for ${book?.title}:
+
+Seller: ${contactInfo.sellerName}
+Email: ${contactInfo.email}
+Phone: ${contactInfo.phone || 'Not provided'}
+Address: ${contactInfo.address || 'Not provided'}
+
+Would you like to open your email client to contact them?
+      `;
+      
+      if (confirm(contactMessage)) {
+        // Open default email client
+        const subject = encodeURIComponent(`Interested in your book: ${book?.title}`);
+        const body = encodeURIComponent(`Hi ${contactInfo.sellerName},
+
+I am interested in your book "${book?.title}". Please let me know if it is still available.
+
+Best regards`);
+        window.open(`mailto:${contactInfo.email}?subject=${subject}&body=${body}`);
+      }
+    } catch (error) {
+      console.error('Error fetching contact details:', error);
+      if (error.response?.status === 401) {
+        alert('Please login to view contact details');
+        navigate('/login');
+      } else {
+        alert('Failed to fetch contact details. Please try again.');
+      }
+    }
+  };
+
+  const handleGetContact = async () => {
+    try {
+      const response = await marketplaceAPI.getContactDetails(id);
+      const contactInfo = response.data;
+      
+      // Create a better formatted contact information display for free books
+      const contactMessage = `📚 Contact Information for FREE Book: "${book?.title}"
+
+👤 Donor: ${contactInfo.sellerName}
+📧 Email: ${contactInfo.email}
+📞 Phone: ${contactInfo.phone || 'Not provided'}
+📍 Address: ${contactInfo.address || 'Not provided'}
+
+🎉 This book is available for free! Contact the donor to arrange pickup.
+
+Would you like to open your email client to contact them?`;
+      
+      if (confirm(contactMessage)) {
+        // Open default email client with better message for free books
+        const subject = encodeURIComponent(`Interested in your free book: ${book?.title}`);
+        const body = encodeURIComponent(`Hi ${contactInfo.sellerName},
+
+I am interested in your free book "${book?.title}". Could we arrange a convenient time for pickup?
+
+Thank you for your generosity in donating this book!
+
+Best regards`);
+        window.open(`mailto:${contactInfo.email}?subject=${subject}&body=${body}`);
+      }
+    } catch (error) {
+      console.error('Error fetching contact details:', error);
+      if (error.response?.status === 401) {
+        alert('Please login to view contact details');
+        navigate('/login');
+      } else {
+        alert('Failed to fetch contact details. Please try again.');
+      }
+    }
+  };  const handleMarkAsSold = () => {
     // Implement mark as sold functionality
     console.log('Marking book as sold');
   };
@@ -59,7 +170,7 @@ const SecondHandProductPage = () => {
         throw new Error('Book ID is required');
       }
       
-      // Ensure we're sending a string ID
+      // For second-hand books, use the marketplace book ID
       const bookId = String(book.id);
       
       const response = await cartAPI.addToCart(bookId, 'secondhand');
@@ -76,6 +187,31 @@ const SecondHandProductPage = () => {
       }
     }
   };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-teal-600"></div>
+      </div>
+    );
+  }
+
+  if (error || !book) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <h3 className="text-lg font-medium text-gray-900 mb-2">Book not found</h3>
+          <p className="text-gray-600 mb-4">{error || 'The book you are looking for does not exist.'}</p>
+          <button
+            onClick={() => navigate('/marketplace')}
+            className="bg-teal-600 text-white px-4 py-2 rounded-lg hover:bg-teal-700"
+          >
+            Back to Marketplace
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -99,9 +235,12 @@ const SecondHandProductPage = () => {
             {/* Book Image */}
             <div className="relative">
               <img
-                src={book.image}
+                src={book.image || 'https://placehold.co/400x600/e2e8f0/1e293b?text=No+Image'}
                 alt={book.title}
                 className="w-full h-[500px] object-contain rounded-lg shadow-md"
+                onError={(e) => {
+                  e.target.src = 'https://placehold.co/400x600/e2e8f0/1e293b?text=No+Image';
+                }}
               />
               {book.rating > 0 && (
                 <div className="absolute top-4 right-4 bg-yellow-400 text-white px-3 py-1 rounded-full text-sm font-medium flex items-center">
@@ -110,7 +249,7 @@ const SecondHandProductPage = () => {
                 </div>
               )}
               <div className="absolute top-4 left-4 bg-teal-500 text-white px-3 py-1 rounded-full text-sm font-medium">
-                {book.listingType === 'rent' ? 'For Rent' : 'For Sale'}
+                {book.listingType === 'free' ? 'Free/Donated' : book.listingType === 'rent' ? 'For Rent' : 'For Sale'}
               </div>
               <div className="absolute bottom-4 left-4 bg-gray-800/75 text-white px-3 py-1 rounded-full text-sm font-medium">
                 {book.condition}
@@ -141,12 +280,23 @@ const SecondHandProductPage = () => {
 
               <div className="bg-gray-50 p-4 rounded-lg">
                 <h3 className="font-medium mb-2">Book Condition</h3>
-                <p className="text-gray-600">{book.description}</p>
+                <p className="text-gray-600 font-medium capitalize">{book.condition}</p>
+                {book.description && (
+                  <div className="mt-3">
+                    <h4 className="font-medium mb-1">Description</h4>
+                    <div 
+                      className="text-gray-600 text-sm prose prose-sm max-w-none"
+                      dangerouslySetInnerHTML={{ __html: book.description }}
+                    />
+                  </div>
+                )}
               </div>
 
               <div className="flex items-center justify-between">
                 <div className="text-3xl font-bold text-teal-600">
-                  {typeof book.price === 'number'
+                  {book.listingType === 'free' 
+                    ? <span className="text-green-600">FREE</span>
+                    : typeof book.price === 'number'
                     ? `${book.currency} ${book.price.toFixed(2)}`
                     : book.price}
                 </div>
@@ -170,20 +320,34 @@ const SecondHandProductPage = () => {
               <div className="flex gap-4">
                 {book.status === 'available' && (
                   <>
-                    <button
-                      onClick={() => setShowMessageForm(true)}
-                      className="flex-1 bg-teal-600 text-white py-3 rounded-lg hover:bg-teal-700 transition-colors duration-300 flex items-center justify-center gap-2"
-                    >
-                      <MessageCircle className="h-5 w-5" />
-                      Contact Seller
-                    </button>
-                    <button 
-                      onClick={handleAddToCart}
-                      className="flex-1 bg-white border border-teal-600 text-teal-600 py-3 rounded-lg hover:bg-teal-50 transition-colors duration-300 flex items-center justify-center gap-2"
-                    >
-                      <ShoppingCart className="h-5 w-5" />
-                      Add to Cart
-                    </button>
+                    {book.listingType === 'free' ? (
+                      // For donated books, only show "Get Contact Details"
+                      <button 
+                        onClick={handleGetContact}
+                        className="flex-1 bg-green-600 text-white py-3 rounded-lg hover:bg-green-700 transition-colors duration-300 flex items-center justify-center gap-2"
+                      >
+                        <User className="h-5 w-5" />
+                        Get Contact Details
+                      </button>
+                    ) : (
+                      // For regular books, show both contact and cart options
+                      <>
+                        <button
+                          onClick={() => setShowMessageForm(true)}
+                          className="flex-1 bg-teal-600 text-white py-3 rounded-lg hover:bg-teal-700 transition-colors duration-300 flex items-center justify-center gap-2"
+                        >
+                          <MessageCircle className="h-5 w-5" />
+                          Contact Seller
+                        </button>
+                        <button 
+                          onClick={handleAddToCart}
+                          className="flex-1 bg-white border border-teal-600 text-teal-600 py-3 rounded-lg hover:bg-teal-50 transition-colors duration-300 flex items-center justify-center gap-2"
+                        >
+                          <ShoppingCart className="h-5 w-5" />
+                          Add to Cart
+                        </button>
+                      </>
+                    )}
                   </>
                 )}
                 {book.sellerId === 'currentUser' && book.status === 'available' && (

@@ -60,24 +60,33 @@ export const cartAPI = {
   getCart: () => api.get('/cart'),
   addToCart: async (bookId, type = 'sold') => {
     try {
-      // First create or get the book in our database
-      const bookResponse = await booksAPI.createOrGetBook({
-        googleBooksId: bookId,
-        type: type,
-        condition: 'new',
-        status: 'available',
-        isAvailable: true,
-        marketplaceStatus: 'active'
-      });
+      let cartResponse;
       
-      if (!bookResponse.data || !bookResponse.data._id) {
-        throw new Error('Failed to create/get book in database');
+      if (type === 'secondhand' || type === 'sold') {
+        // For second-hand books, the bookId is already our database book ID
+        cartResponse = await api.post('/cart', { 
+          book: bookId
+        });
+      } else {
+        // For new books from Google API, create or get the book first
+        const bookResponse = await booksAPI.createOrGetBook({
+          googleBooksId: bookId,
+          type: type,
+          condition: 'new',
+          status: 'available',
+          isAvailable: true,
+          marketplaceStatus: 'active'
+        });
+        
+        if (!bookResponse.data || !bookResponse.data._id) {
+          throw new Error('Failed to create/get book in database');
+        }
+        
+        // Then add to cart using our database book ID
+        cartResponse = await api.post('/cart', { 
+          book: bookResponse.data._id
+        });
       }
-      
-      // Then add to cart using our database book ID
-      const cartResponse = await api.post('/cart', { 
-        book: bookResponse.data._id
-      });
 
       return cartResponse;
     } catch (error) {
@@ -166,6 +175,14 @@ export const requestAPI = {
       throw error;
     }
   },
+  getMyRequests: async () => {
+    try {
+      const response = await api.get('/requests/my-requests');
+      return response.data;
+    } catch (error) {
+      throw error;
+    }
+  },
   getSponsorRequests: async () => {
     try {
       const response = await api.get('/sponsor/requests');
@@ -191,9 +208,31 @@ export const donationAPI = {
 
 // Marketplace API
 export const marketplaceAPI = {
-  getAllListings: () => api.get('/marketplace'),
+  getAllListings: (params = {}) => {
+    const queryParams = new URLSearchParams();
+    Object.keys(params).forEach(key => {
+      if (params[key] !== null && params[key] !== undefined && params[key] !== '') {
+        queryParams.append(key, params[key]);
+      }
+    });
+    return api.get(`/marketplace?${queryParams.toString()}`);
+  },
   getListing: (id) => api.get(`/marketplace/${id}`),
-  createListing: (listingData) => api.post('/marketplace', listingData),
+  getContactDetails: (id) => api.get(`/marketplace/${id}/contact`),
+  createListing: (listingData) => {
+    const formData = new FormData();
+    Object.keys(listingData).forEach(key => {
+      if (listingData[key] !== null && listingData[key] !== undefined) {
+        formData.append(key, listingData[key]);
+      }
+    });
+    return api.post('/marketplace/sell', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
+  },
+  getMyListings: () => api.get('/marketplace/my'),
   updateListing: (id, listingData) => api.put(`/marketplace/${id}`, listingData),
   deleteListing: (id) => api.delete(`/marketplace/${id}`),
 };

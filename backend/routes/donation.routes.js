@@ -11,14 +11,23 @@ const validateDonation = [
   body('quantity').isInt({ min: 1 }).withMessage('Quantity must be at least 1'),
   body('condition').isIn(['new', 'like-new', 'good', 'fair', 'poor']).withMessage('Invalid condition'),
   body('description').notEmpty().withMessage('Description is required'),
-  body('donationType').isIn(['physical', 'sponsor']).withMessage('Invalid donation type')
+  body('donationType').isIn(['physical', 'sponsor']).withMessage('Invalid donation type'),
+  body('contactEmail').isEmail().withMessage('Valid contact email is required'),
+  body('contactPhone').optional().trim(),
+  body('contactAddress').optional().trim()
 ];
 
 // Create a new donation
 router.post('/', auth, upload.array('images', 5), validateDonation, async (req, res) => {
   try {
+    console.log('=== DONATION REQUEST ===');
+    console.log('Request body:', req.body);
+    console.log('Files:', req.files);
+    console.log('User:', req.user);
+    
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
+      console.log('Validation errors:', errors.array());
       return res.status(400).json({ errors: errors.array() });
     }
 
@@ -38,10 +47,16 @@ router.post('/', auth, upload.array('images', 5), validateDonation, async (req, 
         owner: req.user.id.toString(), // Convert to string to ensure proper ObjectId handling
         status: 'available',
         type: 'donated',
+        category: 'free', // Set category as free for donated books
         isAvailable: true,
         marketplaceStatus: 'active',
         price: 0,
-        currency: 'INR'
+        currency: 'INR',
+        sellerContact: {
+          email: req.body.contactEmail || req.user.email || '',
+          phone: req.body.contactPhone || req.user.phone || '',
+          address: req.body.contactAddress || req.user.location || ''
+        }
       };
 
       // If there are images, use the first one as the book image
@@ -50,7 +65,9 @@ router.post('/', auth, upload.array('images', 5), validateDonation, async (req, 
       }
 
       book = new Book(bookData);
+      console.log('Creating new book:', bookData);
       await book.save();
+      console.log('Book saved successfully:', book._id);
     } else {
       // Check if existing book exists and update its status
       book = await Book.findById(bookId);
@@ -76,12 +93,26 @@ router.post('/', auth, upload.array('images', 5), validateDonation, async (req, 
     });
 
     await donation.save();
+    console.log('Donation saved successfully:', donation._id);
+
+    // IMPORTANT: After donation is created, ensure the book is available in marketplace
+    // Update the book to ensure it's available for marketplace
+    await Book.findByIdAndUpdate(book._id, {
+      status: 'available',
+      type: 'donated',
+      category: 'free',
+      isAvailable: true,
+      marketplaceStatus: 'active',
+      price: 0
+    });
+    console.log('Book updated for marketplace availability:', book._id);
 
     // Populate the response with book and donor details
     const populatedDonation = await Donation.findById(donation._id)
       .populate('donor', 'name email')
       .populate('book', 'title author');
 
+    console.log('Populated donation:', populatedDonation);
     res.status(201).json(populatedDonation);
   } catch (error) {
     console.error('Error creating donation:', error);
@@ -155,6 +186,40 @@ router.patch('/:id/status', auth, async (req, res) => {
     res.json(donation);
   } catch (error) {
     res.status(500).json({ message: error.message });
+  }
+});
+
+// Fix existing donated books (temporary route to update existing donations)
+router.post('/fix-marketplace', auth, async (req, res) => {
+  try {
+    console.log('=== FIXING EXISTING DONATED BOOKS ===');
+    
+    // Get all donations
+    const donations = await Donation.find({}).populate('book');
+    console.log('Found donations:', donations.length);
+    
+    let updatedCount = 0;
+    
+    for (const donation of donations) {
+      if (donation.book) {
+        await Book.findByIdAndUpdate(donation.book._id, {
+          status: 'available',
+          type: 'donated',
+          category: 'free',
+          isAvailable: true,
+          marketplaceStatus: 'active',
+          price: 0
+        });
+        console.log(`Updated book: ${donation.book.title}`);
+        updatedCount++;
+      }
+    }
+    
+    console.log(`Fixed ${updatedCount} donated books for marketplace`);
+    res.json({ message: `Fixed ${updatedCount} donated books for marketplace`, updatedCount });
+  } catch (error) {
+    console.error('Error fixing donated books:', error);
+    res.status(500).json({ message: 'Error fixing donated books', error: error.message });
   }
 });
 

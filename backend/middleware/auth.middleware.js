@@ -18,8 +18,11 @@ const auth = async (req, res, next) => {
 
     req.token = token;
     req.user = {
+      _id: user._id,
       id: user._id,
       email: user.email,
+      phone: user.phone,
+      location: user.location,
       role: user.role
     };
     

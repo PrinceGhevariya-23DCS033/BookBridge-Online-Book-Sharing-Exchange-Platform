@@ -29,7 +29,13 @@ router.post('/', [
       condition: req.body.condition,
       owner: req.user._id,
       status: 'available',
-      type: 'donated'
+      type: 'donated',
+      category: 'free', // Set category as free for donated books
+      sellerContact: {
+        email: req.body.contactEmail || req.user.email || '',
+        phone: req.body.contactPhone || req.user.phone || '',
+        address: req.body.contactAddress || req.user.location || ''
+      }
     });
 
     await book.save();
@@ -63,8 +69,14 @@ router.post('/donate', [
     const book = new Book({
       ...req.body,
       type: 'donated',
+      category: 'free', // Set category as free for donated books
       image: req.file.path,
-      owner: req.user._id
+      owner: req.user._id,
+      sellerContact: {
+        email: req.body.contactEmail || req.user.email || '',
+        phone: req.body.contactPhone || req.user.phone || '',
+        address: req.body.contactAddress || req.user.location || ''
+      }
     });
 
     await book.save();
@@ -205,6 +217,7 @@ router.post('/google', auth, async (req, res) => {
       }
 
       // Create new book
+      const bookType = type || 'sold';
       book = new Book({
         title: data.volumeInfo.title,
         author: data.volumeInfo.authors?.[0] || 'Unknown Author',
@@ -213,13 +226,19 @@ router.post('/google', auth, async (req, res) => {
         image: imageUrl,
         isbn: data.volumeInfo.industryIdentifiers?.[0]?.identifier,
         condition: condition || 'new',
-        type: type || 'sold',
+        type: bookType,
+        category: bookType === 'donated' ? 'free' : 'sale', // Set category based on type
         price: bookPrice,
-        owner: req.user.id,
+        owner: req.user._id,
         status: 'available',
         isAvailable: true,
         marketplaceStatus: 'active',
-        googleBooksId
+        googleBooksId,
+        sellerContact: {
+          email: req.body.contactEmail || req.user.email || '',
+          phone: req.body.contactPhone || req.user.phone || '',
+          address: req.body.contactAddress || req.user.location || ''
+        }
       });
 
       await book.save();

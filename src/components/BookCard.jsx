@@ -39,9 +39,12 @@ const BookCard = ({ book, actionType = "buy" }) => {
     <div className="bg-white rounded-lg shadow-md overflow-hidden transition-transform duration-300 hover:shadow-lg hover:-translate-y-1">
       <div className="relative h-48 overflow-hidden">
         <img 
-          src={book.image} 
+          src={book.image || 'https://placehold.co/300x400/e2e8f0/1e293b?text=No+Image'} 
           alt={book.title}
           className="w-full h-full object-cover transition-transform duration-700 hover:scale-110"
+          onError={(e) => {
+            e.target.src = 'https://placehold.co/300x400/e2e8f0/1e293b?text=No+Image';
+          }}
         />
         <button 
           className="absolute top-2 right-2 bg-white rounded-full p-1.5 shadow-md hover:bg-gray-100 transition-colors"
@@ -57,7 +60,11 @@ const BookCard = ({ book, actionType = "buy" }) => {
         
         <div className="flex justify-between items-center mb-3">
           <div className="space-y-1">
-            <span className="font-medium text-lg text-teal-600">${book.price.toFixed(2)}</span>
+            {book.isFree || book.isDonated || book.price === 0 ? (
+              <span className="font-medium text-lg text-green-600">FREE</span>
+            ) : (
+              <span className="font-medium text-lg text-teal-600">${book.price.toFixed(2)}</span>
+            )}
             {book.rentalPrice && (
               <div className="flex items-center text-sm text-gray-600">
                 <Clock className="h-4 w-4 mr-1" />

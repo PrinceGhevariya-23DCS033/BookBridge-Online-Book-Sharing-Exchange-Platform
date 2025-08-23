@@ -1,7 +1,7 @@
 import { Bookmark, BookOpen, ChevronDown, Filter, Heart, MapPin, MessageCircle, Plus, Search, ShoppingCart, Tag, User, X } from 'lucide-react';
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { cartAPI } from '../services/api';
+import { cartAPI, marketplaceAPI } from '../services/api';
 
 const API_KEY = 'AIzaSyAQXJAvdiEO-nuAxqhvj7aLVNmHU_SaNuY';
 const BASE_URL = 'https://www.googleapis.com/books/v1/volumes';
@@ -28,61 +28,21 @@ const MarketplacePage = () => {
   const [newBookListing, setNewBookListing] = useState({
     title: '',
     author: '',
+    genre: 'fiction',
     condition: 'good',
     price: '',
     listingType: 'sale',
     description: '',
     image: null,
+    contactEmail: '',
+    contactPhone: '',
+    contactAddress: '',
   });
-
-  // Mock data for second-hand books (now with user interactions)
-  const [secondHandBooks, setSecondHandBooks] = useState([
-    {
-      id: 'sh1',
-      title: 'The Great Gatsby',
-      author: 'F. Scott Fitzgerald',
-      condition: 'Like New',
-      price: 12.99,
-      currency: 'USD',
-      listingType: 'sale',
-      location: 'New York, NY',
-      seller: 'John Doe',
-      sellerId: 'user1',
-      rating: 4.5,
-      image: 'https://images.unsplash.com/photo-1543002588-bfa74002ed7e?w=500',
-      description: 'Hardcover edition in excellent condition. No marks or highlights.',
-      postedDate: '2024-03-15',
-      category: 'Fiction',
-      status: 'available', // available, sold, rented
-      interestedBuyers: ['user2', 'user3'],
-      messages: [
-        {
-          id: 'msg1',
-          senderId: 'user2',
-          senderName: 'Alice Smith',
-          message: 'Is this book still available?',
-          timestamp: '2024-03-16T10:30:00',
-        },
-      ],
-    },
-    {
-      id: 'sh2',
-      title: 'To Kill a Mockingbird',
-      author: 'Harper Lee',
-      condition: 'Good',
-      price: 8.99,
-      currency: 'USD',
-      listingType: 'rent',
-      location: 'Los Angeles, CA',
-      seller: 'Jane Smith',
-      rating: 4.8,
-      image: 'https://images.unsplash.com/photo-1544947950-fa07a98d237f?w=500',
-      description: 'Paperback in good condition. Some wear on the cover.',
-      postedDate: '2024-03-14',
-      category: 'Fiction',
-    },
-    // Add more mock data as needed
-  ]);
+  const [googleSearch, setGoogleSearch] = useState('');
+  const [googleResults, setGoogleResults] = useState([]);
+  const [googleLoading, setGoogleLoading] = useState(false);
+  const [googleError, setGoogleError] = useState('');
+  const [secondHandBooks, setSecondHandBooks] = useState([]);
 
   const conditions = [
     { id: 'all', label: 'All Conditions' },
@@ -96,6 +56,7 @@ const MarketplacePage = () => {
     { id: 'all', label: 'All Listings' },
     { id: 'sale', label: 'For Sale' },
     { id: 'rent', label: 'For Rent' },
+    { id: 'free', label: 'Free/Donated' },
   ];
 
   const categories = [
@@ -116,17 +77,74 @@ const MarketplacePage = () => {
   ];
 
   const fetchBooks = async (query = 'programming', page = 1) => {
-    if (activeTab === 'secondhand') {
-      // For second-hand books, we'll use the mock data
-      setBooks(secondHandBooks);
-      setTotalResults(secondHandBooks.length);
-      setLoading(false);
-      return;
-    }
-
     setLoading(true);
     setError('');
+    
     try {
+      if (activeTab === 'secondhand') {
+        console.log('=== FETCHING SECOND-HAND BOOKS ===');
+        // Fetch second-hand books from marketplace API
+        const params = {};
+        if (searchQuery) params.search = searchQuery;
+        if (selectedCategory !== 'all') params.genre = selectedCategory;
+        if (selectedCondition !== 'all') params.condition = selectedCondition;
+        if (selectedListingType !== 'all') params.listingType = selectedListingType;
+        if (priceRange.min) params.minPrice = priceRange.min;
+        if (priceRange.max) params.maxPrice = priceRange.max;
+
+        console.log('API params:', params);
+        const response = await marketplaceAPI.getAllListings(params);
+        console.log('Raw API response:', response.data);
+        
+        const marketplaceBooks = response.data.map((book, index) => {
+          console.log(`Processing book ${index + 1}:`, {
+            title: book.title,
+            type: book.type,
+            category: book.category,
+            status: book.status,
+            marketplaceStatus: book.marketplaceStatus,
+            owner: book.owner?.name
+          });
+          
+          return {
+            id: book._id,
+            title: book.title,
+            author: book.author,
+            condition: book.condition,
+            price: book.type === 'donated' ? 0 : book.price, // Free for donated books
+            currency: 'USD',
+            listingType: book.type === 'donated' ? 'free' : 'sale', // Map from book.type
+            category: book.category || (book.type === 'donated' ? 'free' : 'sale'), // Use category field
+            isFree: book.type === 'donated' || book.category === 'free', // Flag for free books
+            isDonated: book.type === 'donated', // Flag for donated books
+            location: book.owner?.location || book.sellerContact?.address || 'Location not specified',
+            seller: book.owner?.name || 'Unknown Seller',
+            sellerId: book.owner?._id,
+            rating: 0, // You might want to implement a rating system
+            image: book.image?.startsWith('http') 
+              ? book.image 
+              : book.image 
+                ? `http://localhost:5000${book.image}` 
+                : 'https://placehold.co/300x400/e2e8f0/1e293b?text=No+Image',
+            description: book.description,
+            postedDate: book.createdAt,
+            genreCategory: book.genre, // Keep genre separate from listing category
+            status: book.status,
+            categories: [book.genre, book.category].filter(Boolean) // Include both genre and category
+          };
+        });
+        
+        console.log('Processed marketplace books:', marketplaceBooks);
+        console.log('Total books to display:', marketplaceBooks.length);
+        
+        setSecondHandBooks(marketplaceBooks);
+        setBooks(marketplaceBooks);
+        setTotalResults(marketplaceBooks.length);
+        setLoading(false);
+        return;
+      }
+
+      // For new books, use Google Books API
       const startIndex = (page - 1) * 20;
       const response = await fetch(
         `${BASE_URL}?q=${query}&key=${API_KEY}&maxResults=20&startIndex=${startIndex}`
@@ -166,6 +184,12 @@ const MarketplacePage = () => {
   useEffect(() => {
     fetchBooks();
   }, [activeTab]);
+
+  useEffect(() => {
+    if (activeTab === 'secondhand') {
+      fetchBooks();
+    }
+  }, [selectedCategory, selectedCondition, selectedListingType, priceRange]);
   
   const handleSearch = (e) => {
     e.preventDefault();
@@ -216,36 +240,115 @@ const MarketplacePage = () => {
     }
   };
   
-  const handleListBook = (e) => {
+  const handleListBook = async (e) => {
     e.preventDefault();
-    const newBook = {
-      id: `sh${Date.now()}`,
-      ...newBookListing,
-      seller: 'Current User', // Replace with actual user name
-      sellerId: 'currentUser', // Replace with actual user ID
-      location: 'User Location', // Replace with actual location
-      postedDate: new Date().toISOString(),
-      status: 'available',
-      interestedBuyers: [],
-      messages: [],
-      rating: 0,
-    };
-    setSecondHandBooks([newBook, ...secondHandBooks]);
-    setShowListBookForm(false);
-    setNewBookListing({
-      title: '',
-      author: '',
-      condition: 'good',
-      price: '',
-      listingType: 'sale',
-      description: '',
-      image: null,
-    });
+    try {
+      setLoading(true);
+      
+      // Create a FormData object for the listing
+      const listingData = {
+        title: newBookListing.title,
+        author: newBookListing.author,
+        genre: newBookListing.genre,
+        condition: newBookListing.condition,
+        price: parseFloat(newBookListing.price),
+        description: newBookListing.description,
+        contactEmail: newBookListing.contactEmail,
+        contactPhone: newBookListing.contactPhone,
+        contactAddress: newBookListing.contactAddress
+      };
+
+      // Handle image
+      if (newBookListing.image) {
+        // If image is a base64 string from Google Books or file upload
+        listingData.image = newBookListing.image;
+      }
+
+      const response = await marketplaceAPI.createListing(listingData);
+      
+      if (response.data) {
+        // Add the new book to the local state
+        const newBook = {
+          id: response.data._id,
+          title: response.data.title,
+          author: response.data.author,
+          condition: response.data.condition,
+          price: response.data.price,
+          currency: 'USD',
+          listingType: 'sale',
+          location: response.data.owner?.location || 'Location not specified',
+          seller: response.data.owner?.name || 'You',
+          sellerId: response.data.owner?._id,
+          rating: 0,
+          image: response.data.image,
+          description: response.data.description,
+          postedDate: response.data.createdAt,
+          category: response.data.genre,
+          status: response.data.status,
+          categories: [response.data.genre]
+        };
+
+        setSecondHandBooks([newBook, ...secondHandBooks]);
+        setBooks([newBook, ...books]);
+        
+        setShowListBookForm(false);
+        setNewBookListing({
+          title: '',
+          author: '',
+          genre: 'fiction',
+          condition: 'good',
+          price: '',
+          listingType: 'sale',
+          description: '',
+          image: null,
+          contactEmail: '',
+          contactPhone: '',
+          contactAddress: '',
+        });
+        
+        alert('Book listed successfully!');
+      }
+    } catch (error) {
+      console.error('Error listing book:', error);
+      setError(error.response?.data?.message || 'Failed to list book. Please try again.');
+    } finally {
+      setLoading(false);
+    }
   };
   
-  const handleContactSeller = (bookId) => {
-    // Implement messaging functionality
-    console.log('Contact seller for book:', bookId);
+  const handleContactSeller = async (bookId) => {
+    try {
+      const response = await marketplaceAPI.getContactDetails(bookId);
+      const contactInfo = response.data;
+      
+      // Create a modal or alert with contact information
+      const contactMessage = `
+Seller Contact Information:
+• Name: ${contactInfo.sellerName}
+• Email: ${contactInfo.email}
+• Phone: ${contactInfo.phone || 'Not provided'}
+• Address: ${contactInfo.address || 'Not provided'}
+
+You can reach out to the seller using the email address: ${contactInfo.email}
+      `;
+      
+      alert(contactMessage);
+      
+      // Optionally, open default email client
+      if (contactInfo.email) {
+        const subject = encodeURIComponent('Interested in your book listing');
+        const body = encodeURIComponent('Hi, I am interested in your book listing. Please let me know if it is still available.');
+        window.open(`mailto:${contactInfo.email}?subject=${subject}&body=${body}`);
+      }
+    } catch (error) {
+      console.error('Error fetching contact details:', error);
+      if (error.response?.status === 401) {
+        alert('Please login to view contact details');
+        navigate('/login');
+      } else {
+        alert('Failed to fetch contact details. Please try again.');
+      }
+    }
   };
 
   const handleMarkAsSold = (bookId) => {
@@ -265,7 +368,16 @@ const MarketplacePage = () => {
         throw new Error('Book ID is required');
       }
       
-      // Ensure we're sending a string ID
+      // For free/donated books, handle differently
+      if (book.isFree || book.isDonated || book.price === 0) {
+        const response = await handleRequestDonatedBook(book);
+        if (response) {
+          alert('Book request sent successfully! You will be contacted by the donor.');
+        }
+        return;
+      }
+      
+      // For second-hand books, use the marketplace book ID
       const bookId = String(book.id);
       
       const response = await cartAPI.addToCart(bookId, activeTab === 'secondhand' ? 'secondhand' : 'new');
@@ -280,6 +392,50 @@ const MarketplacePage = () => {
       } else {
         alert(error.message || error.response?.data?.message || 'Failed to add book to cart');
       }
+    }
+  };
+
+  const handleRequestDonatedBook = async (book) => {
+    try {
+      // For now, we'll simulate a successful request
+      // In a real application, you might want to:
+      // 1. Send an email to the donor
+      // 2. Create a request record in the database
+      // 3. Show a contact form
+      console.log('Requesting donated book:', book);
+      return true; // Success
+    } catch (error) {
+      console.error('Error requesting donated book:', error);
+      throw error;
+    }
+  };
+  
+  // Google Books API search for the List Book form
+  const handleGoogleSearch = async (query) => {
+    if (!query.trim()) {
+      setGoogleResults([]);
+      return;
+    }
+    setGoogleLoading(true);
+    setGoogleError('');
+    try {
+      const response = await fetch(
+        `${BASE_URL}?q=${encodeURIComponent(query)}&key=${API_KEY}&maxResults=5`
+      );
+      const data = await response.json();
+      if (data.error) throw new Error(data.error.message);
+      setGoogleResults(
+        (data.items || []).map((book) => ({
+          id: book.id,
+          title: book.volumeInfo.title,
+          author: (book.volumeInfo.authors && book.volumeInfo.authors[0]) || '',
+          image: book.volumeInfo.imageLinks?.thumbnail || '',
+        }))
+      );
+    } catch (err) {
+      setGoogleError('Failed to fetch suggestions.');
+    } finally {
+      setGoogleLoading(false);
     }
   };
   
@@ -359,6 +515,52 @@ const MarketplacePage = () => {
                 </button>
               </div>
               <form onSubmit={handleListBook} className="space-y-6">
+                {/* Google Books Search */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Search Book (Google Books)
+                  </label>
+                  <input
+                    type="text"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent"
+                    placeholder="Type to search for book title..."
+                    value={googleSearch}
+                    onChange={e => {
+                      setGoogleSearch(e.target.value);
+                      handleGoogleSearch(e.target.value);
+                    }}
+                  />
+                  {googleLoading && <div className="text-xs text-gray-500 mt-1">Searching...</div>}
+                  {googleError && <div className="text-xs text-red-500 mt-1">{googleError}</div>}
+                  {googleResults.length > 0 && (
+                    <div className="border border-gray-200 rounded-lg mt-2 bg-white shadow-lg max-h-48 overflow-y-auto z-10 relative">
+                      {googleResults.map(result => (
+                        <div
+                          key={result.id}
+                          className="flex items-center gap-2 px-3 py-2 hover:bg-teal-50 cursor-pointer"
+                          onClick={() => {
+                            setNewBookListing(prev => ({
+                              ...prev,
+                              title: result.title,
+                              author: result.author,
+                              image: result.image,
+                            }));
+                            setGoogleSearch(result.title);
+                            setGoogleResults([]);
+                          }}
+                        >
+                          {result.image && (
+                            <img src={result.image} alt={result.title} className="w-8 h-12 object-cover rounded" />
+                          )}
+                          <div>
+                            <div className="font-medium text-sm">{result.title}</div>
+                            <div className="text-xs text-gray-500">{result.author}</div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     Book Title
@@ -382,6 +584,23 @@ const MarketplacePage = () => {
                     value={newBookListing.author}
                     onChange={(e) => setNewBookListing(prev => ({ ...prev, author: e.target.value }))}
                   />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Genre
+                  </label>
+                  <select
+                    required
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent"
+                    value={newBookListing.genre}
+                    onChange={(e) => setNewBookListing(prev => ({ ...prev, genre: e.target.value }))}
+                  >
+                    {categories.filter(c => c.id !== 'all').map(category => (
+                      <option key={category.id} value={category.id}>
+                        {category.label}
+                      </option>
+                    ))}
+                  </select>
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div>
@@ -444,6 +663,51 @@ const MarketplacePage = () => {
                     value={newBookListing.description}
                     onChange={(e) => setNewBookListing(prev => ({ ...prev, description: e.target.value }))}
                   />
+                </div>
+
+                {/* Contact Information Section */}
+                <div className="border-t pt-6">
+                  <h3 className="text-lg font-medium text-gray-900 mb-4">Contact Information</h3>
+                  
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Contact Email <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      type="email"
+                      required
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent"
+                      value={newBookListing.contactEmail}
+                      onChange={(e) => setNewBookListing(prev => ({ ...prev, contactEmail: e.target.value }))}
+                      placeholder="Your email for buyers to contact you"
+                    />
+                  </div>
+                  
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Contact Phone (Optional)
+                    </label>
+                    <input
+                      type="tel"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent"
+                      value={newBookListing.contactPhone}
+                      onChange={(e) => setNewBookListing(prev => ({ ...prev, contactPhone: e.target.value }))}
+                      placeholder="Your phone number"
+                    />
+                  </div>
+                  
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Address (Optional)
+                    </label>
+                    <textarea
+                      rows="3"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent"
+                      value={newBookListing.contactAddress}
+                      onChange={(e) => setNewBookListing(prev => ({ ...prev, contactAddress: e.target.value }))}
+                      placeholder="Your address for local pickup (optional)"
+                    />
+                  </div>
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -726,6 +990,11 @@ const MarketplacePage = () => {
                   )}
                   
                   <div className="flex flex-wrap gap-2 mb-4">
+                    {book.isDonated && (
+                      <span className="bg-blue-100 text-blue-800 px-2 py-1 rounded-full text-xs font-medium">
+                        DONATED
+                      </span>
+                    )}
                     {book.categories?.slice(0, 2).map((category, index) => (
                       <span
                         key={index}
@@ -738,9 +1007,12 @@ const MarketplacePage = () => {
                       
                   <div className="flex justify-between items-center">
                     <div className="text-teal-600 font-semibold">
-                      {typeof book.price === 'number'
-                        ? `${book.currency} ${book.price.toFixed(2)}`
-                        : book.price}
+                      {book.isFree || book.isDonated || book.price === 0 
+                        ? <span className="bg-green-100 text-green-800 px-2 py-1 rounded text-sm">FREE</span>
+                        : (typeof book.price === 'number'
+                          ? `${book.currency} ${book.price.toFixed(2)}`
+                          : book.price)
+                      }
                     </div>
                     <div className="flex gap-2">
                       {activeTab === 'secondhand' && book.status === 'available' && (
@@ -777,9 +1049,18 @@ const MarketplacePage = () => {
                       {book.status === 'available' && (
                         <button 
                           onClick={(e) => handleAddToCart(book, e)}
-                          className="p-2 text-gray-600 hover:text-teal-600 transition-colors duration-300"
+                          className={`p-2 transition-colors duration-300 ${
+                            book.isFree || book.isDonated || book.price === 0
+                              ? 'text-green-600 hover:text-green-700'
+                              : 'text-gray-600 hover:text-teal-600'
+                          }`}
+                          title={book.isFree || book.isDonated || book.price === 0 ? 'Request this book' : 'Add to cart'}
                         >
-                          <ShoppingCart className="h-5 w-5" />
+                          {book.isFree || book.isDonated || book.price === 0 ? (
+                            <MessageCircle className="h-5 w-5" />
+                          ) : (
+                            <ShoppingCart className="h-5 w-5" />
+                          )}
                         </button>
                       )}
                     </div>
@@ -856,9 +1137,12 @@ const MarketplacePage = () => {
                         <p className="text-sm text-gray-600">{book.authors?.join(', ') || book.author}</p>
                         <div className="mt-2 flex justify-between items-center">
                           <span className="text-teal-600 font-medium">
-                            {typeof book.price === 'number'
-                              ? `${book.currency} ${book.price.toFixed(2)}`
-                              : book.price}
+                            {book.isFree || book.isDonated || book.price === 0 
+                              ? <span className="bg-green-100 text-green-800 px-2 py-1 rounded text-xs">FREE</span>
+                              : (typeof book.price === 'number'
+                                ? `${book.currency} ${book.price.toFixed(2)}`
+                                : book.price)
+                            }
                           </span>
                   <button
                             onClick={() => toggleWishlist(book)}

@@ -36,7 +36,10 @@ router.get('/requests', auth, async (req, res) => {
         urgency: request.urgency || 'medium',
         status: request.status || 'pending',
         priority: request.priority || 0,
+        quantity: request.quantity || 1,
         documents: request.documents || [],
+        coverImage: request.coverImage || '',
+        address: request.address || null,
         requester: request.requester ? {
           _id: request.requester._id.toString(),
           name: request.requester.name || 'Unknown',

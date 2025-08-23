@@ -30,6 +30,15 @@ const bookSchema = new mongoose.Schema({
     enum: ['donated', 'sold', 'new'],
     required: true
   },
+  category: {
+    type: String,
+    enum: ['free', 'donated', 'sale', 'rent'],
+    default: function() {
+      if (this.type === 'donated') return 'free';
+      if (this.type === 'sold') return 'sale';
+      return 'sale';
+    }
+  },
   image: {
     type: String,
     default: 'https://placehold.co/128x192/e2e8f0/1e293b?text=No+Image',
@@ -58,6 +67,23 @@ const bookSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
     required: true
+  },
+  sellerContact: {
+    email: {
+      type: String,
+      required: function() {
+        return this.type === 'sold';
+      },
+      trim: true
+    },
+    phone: {
+      type: String,
+      trim: true
+    },
+    address: {
+      type: String,
+      trim: true
+    }
   },
   status: {
     type: String,

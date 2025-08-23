@@ -2,7 +2,7 @@ import { AlertCircle, Search, Upload } from 'lucide-react';
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Footer from '../components/Footer';
-import { booksAPI, donationAPI } from '../services/api';
+import { booksAPI, donationAPI, userAPI } from '../services/api';
 
 function DonationPage() {
   const navigate = useNavigate();
@@ -22,7 +22,10 @@ function DonationPage() {
     condition: 'good',
     description: '',
     images: [],
-    donationType: 'physical'
+    donationType: 'physical',
+    contactEmail: '',
+    contactPhone: '',
+    contactAddress: ''
   });
   const [success, setSuccess] = useState(false);
 
@@ -45,6 +48,27 @@ function DonationPage() {
       }
     };
     fetchBooks();
+  }, []);
+
+  useEffect(() => {
+    const fetchUserProfile = async () => {
+      try {
+        const response = await userAPI.getProfile();
+        if (response.data) {
+          const user = response.data;
+          setFormData(prev => ({
+            ...prev,
+            contactEmail: user.email || '',
+            contactPhone: user.phone || '',
+            contactAddress: user.location || ''
+          }));
+        }
+      } catch (err) {
+        console.error('Error fetching user profile:', err);
+        // Don't show error for profile fetch failure, just continue without pre-population
+      }
+    };
+    fetchUserProfile();
   }, []);
 
   const fetchBookDetailsByISBN = async (isbn) => {
@@ -554,6 +578,59 @@ function DonationPage() {
                 )}
               </div>
                 
+              {/* Contact Details Section */}
+              <div className="bg-gray-50 p-6 rounded-md">
+                <h3 className="font-medium text-gray-900 mb-4">Contact Details</h3>
+                <p className="text-sm text-gray-600 mb-4">
+                  Provide your contact information so recipients can reach you if needed.
+                </p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label htmlFor="contactEmail" className="block text-sm font-medium text-gray-700">
+                      Email Address*
+                    </label>
+                    <input
+                      type="email"
+                      id="contactEmail"
+                      name="contactEmail"
+                      required
+                      value={formData.contactEmail}
+                      onChange={handleChange}
+                      className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                      placeholder="your.email@example.com"
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="contactPhone" className="block text-sm font-medium text-gray-700">
+                      Phone Number
+                    </label>
+                    <input
+                      type="tel"
+                      id="contactPhone"
+                      name="contactPhone"
+                      value={formData.contactPhone}
+                      onChange={handleChange}
+                      className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                      placeholder="+1 (555) 123-4567"
+                    />
+                  </div>
+                </div>
+                <div className="mt-4">
+                  <label htmlFor="contactAddress" className="block text-sm font-medium text-gray-700">
+                    Address (for book pickup/delivery)
+                  </label>
+                  <textarea
+                    id="contactAddress"
+                    name="contactAddress"
+                    rows="3"
+                    value={formData.contactAddress}
+                    onChange={handleChange}
+                    className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                    placeholder="Street address, city, state, zip code"
+                  />
+                </div>
+              </div>
+
               <div>
                   <button
                   type="submit"
