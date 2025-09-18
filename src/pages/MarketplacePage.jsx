@@ -274,7 +274,7 @@ const MarketplacePage = () => {
           author: response.data.author,
           condition: response.data.condition,
           price: response.data.price,
-          currency: 'USD',
+          currency: 'INR',
           listingType: 'sale',
           location: response.data.owner?.location || 'Location not specified',
           seller: response.data.owner?.name || 'You',

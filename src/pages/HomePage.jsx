@@ -6,6 +6,7 @@ import StatCard from '../components/StatCard';
 import TestimonialCard from '../components/TestimonialCard';
 import { stats } from '../data/stats';
 import { testimonials } from '../data/testimonials';
+import heroBookImage from '../assets/images/hero-book.png';
 
 const HomePage = () => {
   const [currentTestimonial, setCurrentTestimonial] = useState(0);
@@ -41,12 +42,18 @@ const HomePage = () => {
                 </Link>
               </div>
             </div>
-            <div className="hidden md:block">
-              <img 
-                src="https://images.pexels.com/photos/5077074/pexels-photo-5077074.jpeg?auto=compress&cs=tinysrgb&w=1260&h=750&dpr=1" 
-                alt="users with books" 
-                className="rounded-lg shadow-2xl transform rotate-2 transition-transform duration-500 hover:rotate-0"
-              />
+            <div className="hidden md:flex justify-center items-center">
+              <div className="relative">
+                <div className="absolute inset-0 bg-gradient-to-r from-blue-400 to-teal-400 rounded-2xl transform rotate-3 opacity-20"></div>
+                <img 
+                  src={heroBookImage} 
+                  alt="Hero Book - BookBridge Platform" 
+                  className="relative rounded-2xl shadow-2xl transform transition-all duration-500 hover:scale-105 hover:rotate-1 max-w-md w-full h-auto object-contain"
+                />
+                <div className="absolute -bottom-4 -right-4 bg-white rounded-full p-3 shadow-lg">
+                  <BookOpen className="h-8 w-8 text-teal-600" />
+                </div>
+              </div>
             </div>
           </div>
         </div>

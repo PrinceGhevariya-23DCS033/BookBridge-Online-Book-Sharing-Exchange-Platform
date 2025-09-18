@@ -17,6 +17,9 @@ import requestAPI from '../services/requestAPI';
 
 const DEFAULT_BOOK_COVER = 'https://images.unsplash.com/photo-1544947950-fa07a98d237f?q=80&w=1000&auto=format&fit=crop';
 
+// Cache for API fetched covers to avoid repeated requests
+const coverCache = new Map();
+
 const SponsorPage = () => {
   const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -24,6 +27,7 @@ const SponsorPage = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [filter, setFilter] = useState('all'); // all, pending, approved, rejected
   const [actionLoading, setActionLoading] = useState({}); // Track loading state for individual actions
+  const [imageLoadingStates, setImageLoadingStates] = useState({}); // Track individual image loading
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -34,28 +38,53 @@ const SponsorPage = () => {
     try {
       if (!isbn) return DEFAULT_BOOK_COVER;
       
-      // Use OpenLibrary API (same as request page) for consistency
+      // Check cache first
+      const cacheKey = isbn.replace(/[-\s]/g, '');
+      if (coverCache.has(cacheKey)) {
+        return coverCache.get(cacheKey);
+      }
+      
       const cleanISBN = isbn.replace(/[-\s]/g, '');
       
-      // Try OpenLibrary first
-      const openLibraryResponse = await fetch(`https://covers.openlibrary.org/b/isbn/${cleanISBN}-L.jpg`);
-      if (openLibraryResponse.ok && openLibraryResponse.status !== 404) {
-        return `https://covers.openlibrary.org/b/isbn/${cleanISBN}-L.jpg`;
+      // Try OpenLibrary first (faster and more reliable)
+      const openLibraryUrl = `https://covers.openlibrary.org/b/isbn/${cleanISBN}-M.jpg`;
+      
+      // Check if OpenLibrary image exists
+      try {
+        const response = await fetch(openLibraryUrl, { method: 'HEAD' });
+        if (response.ok) {
+          coverCache.set(cacheKey, openLibraryUrl);
+          return openLibraryUrl;
+        }
+      } catch (error) {
+        console.log('OpenLibrary HEAD request failed, trying full request');
       }
       
-      // Fallback to Google Books API
-      const response = await fetch(`https://www.googleapis.com/books/v1/volumes?q=isbn:${cleanISBN}`);
-      const data = await response.json();
-      
-      if (data.items && data.items[0]?.volumeInfo?.imageLinks?.thumbnail) {
-        return data.items[0].volumeInfo.imageLinks.thumbnail;
-      }
-      
-      // Return default book cover if no image found
+      // Cache the default result to avoid repeated failed requests
+      coverCache.set(cacheKey, DEFAULT_BOOK_COVER);
       return DEFAULT_BOOK_COVER;
     } catch (error) {
       console.error('Error fetching book cover:', error);
       return DEFAULT_BOOK_COVER;
+    }
+  };
+
+  const loadImageForRequest = async (requestId, isbn) => {
+    if (!isbn || imageLoadingStates[requestId]) return;
+    
+    setImageLoadingStates(prev => ({ ...prev, [requestId]: true }));
+    
+    try {
+      const coverImage = await fetchBookCover(isbn);
+      setRequests(prev => prev.map(request => 
+        request._id === requestId 
+          ? { ...request, displayImage: coverImage }
+          : request
+      ));
+    } catch (error) {
+      console.error('Error loading image for request:', requestId, error);
+    } finally {
+      setImageLoadingStates(prev => ({ ...prev, [requestId]: false }));
     }
   };
   
@@ -74,19 +103,38 @@ const SponsorPage = () => {
         return;
       }
       
-      // Fetch cover images for each request
-      const requestsWithCovers = await Promise.all(
-        data.map(async (request) => {
-          const coverImage = await fetchBookCover(request.isbn);
-          return {
-            ...request,
-            coverImage
-          };
-        })
-      );
+      // Process requests and handle cover images immediately for uploaded images
+      const processedRequests = data.map((request) => {
+        let displayImage = DEFAULT_BOOK_COVER;
+        let hasUploadedImage = false;
+        
+        if (request.coverImage && request.coverImage.trim() !== '') {
+          // Use uploaded cover image (stored in backend) - these load instantly
+          displayImage = request.coverImage.startsWith('http') 
+            ? request.coverImage 
+            : `${window.location.protocol}//${window.location.hostname}:3001${request.coverImage}`;
+          hasUploadedImage = true;
+          
+          console.log('Request has uploaded cover image:', {
+            title: request.title,
+            originalPath: request.coverImage,
+            displayImage: displayImage
+          });
+        }
+        
+        return {
+          ...request,
+          displayImage,
+          hasUploadedImage,
+          needsApiImage: !hasUploadedImage && request.isbn
+        };
+      });
       
-      console.log('Requests with covers:', requestsWithCovers.length);
-      setRequests(requestsWithCovers);
+      console.log('Processed requests:', processedRequests.length);
+      setRequests(processedRequests);
+      
+      // Don't fetch external covers immediately - let them load on demand
+      console.log('Requests loaded instantly with uploaded images or defaults');
     } catch (err) {
       console.error('Error fetching requests:', err);
       
@@ -113,6 +161,76 @@ const SponsorPage = () => {
     
     return matchesSearch && matchesFilter;
   });
+
+  // Smart Image Component for lazy loading
+  const SmartBookImage = ({ request }) => {
+    const [imageLoaded, setImageLoaded] = useState(request.hasUploadedImage);
+    const [showLoader, setShowLoader] = useState(false);
+
+    useEffect(() => {
+      // Only load external images if needed and not already loaded
+      if (request.needsApiImage && !imageLoaded && request.displayImage === DEFAULT_BOOK_COVER) {
+        const timer = setTimeout(() => {
+          setShowLoader(true);
+          loadImageForRequest(request._id, request.isbn);
+        }, 100); // Small delay to avoid loading all at once
+
+        return () => clearTimeout(timer);
+      }
+    }, [request._id, request.needsApiImage, imageLoaded, request.displayImage, request.isbn]);
+
+    useEffect(() => {
+      if (request.displayImage !== DEFAULT_BOOK_COVER) {
+        setImageLoaded(true);
+        setShowLoader(false);
+      }
+    }, [request.displayImage]);
+
+    const handleImageError = (e) => {
+      console.log('Image failed to load:', request.displayImage);
+      e.target.style.display = 'none';
+      e.target.parentNode.querySelector('.fallback-content').style.display = 'flex';
+    };
+
+    const shouldShowImage = request.displayImage && request.displayImage !== DEFAULT_BOOK_COVER;
+
+    return (
+      <div className="h-64 bg-gradient-to-br from-gray-100 to-gray-200 flex items-center justify-center overflow-hidden relative">
+        {shouldShowImage ? (
+          <>
+            <img
+              src={request.displayImage}
+              alt={request.title}
+              className="w-full h-full object-contain p-4"
+              onError={handleImageError}
+              onLoad={() => {
+                setImageLoaded(true);
+                setShowLoader(false);
+              }}
+            />
+            <div className="fallback-content hidden flex-col items-center justify-center h-full text-gray-400 absolute inset-0">
+              <BookOpen className="w-16 h-16 mb-2" />
+              <span className="text-sm font-medium text-center px-4">{request.title}</span>
+            </div>
+          </>
+        ) : (
+          <div className="flex flex-col items-center justify-center h-full text-gray-400">
+            {showLoader && imageLoadingStates[request._id] ? (
+              <>
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-teal-600 mb-2"></div>
+                <span className="text-xs text-gray-500">Loading cover...</span>
+              </>
+            ) : (
+              <>
+                <BookOpen className="w-16 h-16 mb-2" />
+                <span className="text-sm font-medium text-center px-4">{request.title}</span>
+              </>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
 
   const handleApprove = async (id) => {
     try {
@@ -322,33 +440,10 @@ const SponsorPage = () => {
 
                 {/* Book Cover and Info */}
                 <div className="relative">
-                  <div className="h-64 bg-gradient-to-br from-gray-100 to-gray-200 flex items-center justify-center overflow-hidden">
-                    {request.coverImage && request.coverImage !== DEFAULT_BOOK_COVER ? (
-                      <img
-                        src={request.coverImage}
-                        alt={request.title}
-                        className="w-full h-full object-contain p-4"
-                        onError={(e) => {
-                          console.log('Image failed to load:', request.coverImage);
-                          e.target.onerror = null;
-                          e.target.style.display = 'none';
-                          e.target.parentNode.innerHTML = `
-                            <div class="flex flex-col items-center justify-center h-full text-gray-400">
-                              <svg class="w-16 h-16 mb-2" fill="currentColor" viewBox="0 0 24 24">
-                                <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zM9 17H7v-7h2v7zm4 0h-2V7h2v10zm4 0h-2v-4h2v4z"/>
-                              </svg>
-                              <span class="text-sm font-medium">${request.title}</span>
-                            </div>
-                          `;
-                        }}
-                      />
-                    ) : (
-                      <div className="flex flex-col items-center justify-center h-full text-gray-400">
-                        <BookOpen className="w-16 h-16 mb-2" />
-                        <span className="text-sm font-medium text-center px-4">{request.title}</span>
-                      </div>
-                    )}
-                  </div>
+                  <SmartBookImage 
+                    request={request}
+                    className="h-64"
+                  />
                 </div>
 
                 {/* Book Details */}
